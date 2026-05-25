@@ -11,9 +11,9 @@ const SIN_BG = { verde:"#0A2A0A",amarelo:"#2A2A08",vermelho:"#2A0A0A" };
 const SIN_LB = { verde:"🟢 Boa Negociação",amarelo:"🟡 Moderada",vermelho:"🔴 Difícil" };
 
 // ─── URL do JSON no SharePoint ─────────────────────────────────────────────
-const SP_SITE = "https://gpssacombr.sharepoint.com/sites/BMsGestodeContratos";
-const JSON_PATH = "/Documentos Compartilhados/Acompamnhamento de Atividades Farmer/Planilha - Performance Farmer/dados_farmer.json";
-const JSON_URL = `${SP_SITE}/_api/web/GetFileByServerRelativePath(decodedurl='${encodeURIComponent("/sites/BMsGestodeContratos" + JSON_PATH)}')/\$value`;
+// GitHub raw URL — sem restrição de CORS
+
+const JSON_URL = "https://raw.githubusercontent.com/MARYeAdelia/Mari93/main/dados_farmer.json";
 
 const fmt = (v) => (!v&&v!==0)?"—":new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL",maximumFractionDigits:0}).format(v);
 const fmtPct = (v) => (v!=null&&v!==""&&!isNaN(v))?`${(parseFloat(v)*100).toFixed(1)}%`:"—";
@@ -149,26 +149,14 @@ export default function FarmDashboard() {
     const load = async () => {
       setLd(true); setErr(null);
       try {
-        const res = await fetch(JSON_URL, {
-          credentials: "include",
-          headers: { "Accept": "application/json; odata=verbose" }
-        });
-        if(res.status === 401 || res.status === 403) {
-          throw new Error("login");
-        }
+        const res = await fetch(JSON_URL + "?t=" + Date.now());
         if(!res.ok) throw new Error(`Erro ${res.status}`);
-        const text = await res.text();
-        const json = JSON.parse(text);
-        // SharePoint API retorna dentro de d.results ou direto
-        const rows = json?.d ? JSON.parse(json.d) : (Array.isArray(json) ? json : json.value || []);
+        const json = await res.json();
+        const rows = Array.isArray(json) ? json : (json.value || []);
         setData(processRows(rows));
         setLU(new Date().toLocaleString("pt-BR"));
       } catch(e) {
-        if(e.message === "login") {
-          setErr("login");
-        } else {
-          setErr(e.message||"Erro ao carregar dados.");
-        }
+        setErr(e.message||"Erro ao carregar dados.");
       } finally { setLd(false); }
     };
     load();
@@ -212,23 +200,7 @@ export default function FarmDashboard() {
 
   const filtHistorico=filterRows(data);
 
-  // ─── TELA DE LOGIN ────────────────────────────────────────────────
-  if(error==="login") return (
-    <div style={{minHeight:"100vh",background:"#0D0D0F",color:"#F0EDE8",fontFamily:"'Georgia',serif",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{textAlign:"center",maxWidth:400}}>
-        <div style={{fontSize:40,marginBottom:16}}>🔐</div>
-        <div style={{fontSize:20,marginBottom:8}}>Acesso Restrito</div>
-        <div style={{fontSize:13,color:"#5A5A5A",marginBottom:24}}>Você precisa estar logado com sua conta Microsoft corporativa para acessar este dashboard.</div>
-        <a href={`https://login.microsoftonline.com/common/oauth2/authorize?resource=${SP_SITE}&response_type=token`} target="_blank" rel="noreferrer"
-          style={{display:"inline-block",padding:"12px 28px",background:"#C8A96E",color:"#0D0D0F",textDecoration:"none",fontSize:12,letterSpacing:2,textTransform:"uppercase"}}>
-          Entrar com Microsoft
-        </a>
-        <div style={{fontSize:11,color:"#3A3A3A",marginTop:12}}>Após o login, recarregue esta página.</div>
-      </div>
-    </div>
-  );
-
-  return (
+    return (
     <div style={{minHeight:"100vh",background:"#0D0D0F",color:"#F0EDE8",fontFamily:"'Georgia',serif"}}>
 
       {/* HEADER */}
