@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
+import * as XLSX from "xlsx";
 
 const ANALISTAS = ["MARIANA","WILDER","GIOVANNI"];
 const LIDERANCA = ["CARLA","DARLAN"];
@@ -9,11 +10,6 @@ const CAT_ENT_C = { "PEC":"#7CB9E8","Abertura de Custo":"#A8E87C","Proposta Come
 const SIN_C  = { verde:"#3A8A3A",amarelo:"#8A8A2A",vermelho:"#8A2A2A" };
 const SIN_BG = { verde:"#0A2A0A",amarelo:"#2A2A08",vermelho:"#2A0A0A" };
 const SIN_LB = { verde:"🟢 Boa Negociação",amarelo:"🟡 Moderada",vermelho:"🔴 Difícil" };
-
-// ─── URL do JSON no SharePoint ─────────────────────────────────────────────
-const SP_BASE = "https://gpssacombr.sharepoint.com/sites/BMsGestodeContratos";
-const SP_FILE = "/sites/BMsGestodeContratos/Documentos Compartilhados/Acompamnhamento de Atividades Farmer/Planilha - Performance Farmer/dados_farmer.json";
-const JSON_URL = `${SP_BASE}/_api/web/GetFileByServerRelativePath(decodedurl='${encodeURIComponent(SP_FILE)}')/$value`;
 
 const fmt = (v) => (!v&&v!==0)?"—":new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL",maximumFractionDigits:0}).format(v);
 const fmtPct = (v) => (v!=null&&v!==""&&!isNaN(v))?`${(parseFloat(v)*100).toFixed(1)}%`:"—";
@@ -70,48 +66,56 @@ const matchSin = (v) => {
   return null;
 };
 
-// Converte linha do JSON (que vem com nomes de coluna do Excel) para o formato do app
+const parseExcel = (file) => new Promise((res,rej)=>{
+  const rd=new FileReader();
+  rd.onload=(e)=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:"array"});
+      const nm=wb.SheetNames.find(s=>s.toUpperCase()==="DADOS")||wb.SheetNames[0];
+      res(XLSX.utils.sheet_to_json(wb.Sheets[nm],{defval:""}));
+    }catch(err){rej(err);}
+  };
+  rd.onerror=rej;
+  rd.readAsArrayBuffer(file);
+});
+
 const processRows = (rows) => {
   if(!rows||!rows.length) return [];
-  return rows.map(r => {
-    // O Power Automate preserva os nomes das colunas exatamente como na planilha
-    const ativ  = (r["ATIVIDADE1"]||r["ATIVIDADE"]||"").toString().trim().toUpperCase();
-    const tipo  = (r["TIPO DE PROPOSTA"]||"").toString().trim().toUpperCase();
-    const obs   = (r["OBS."]||r["OBS"]||"").toString().trim();
-    const valAtual  = n(r["VALOR CONTRATO ATUAL"]);
-    const valPleito = n(r["VALOR CONTRATO COM REAJUSTE + PLEITO"])||n(r["VALOR CONTRATO COM REAJUSTE"]);
-    const row = {
-      isRevisao:   (r["REVISÃO"]||r["REVISAO"]||"").toString().toUpperCase().includes("REVIS"),
-      nProposta:   (r["Nº PROPOSTA"]||r["N PROPOSTA"]||"").toString().trim(),
+  return rows.map(r=>{
+    const ativ=(r["ATIVIDADE1"]||r["ATIVIDADE"]||"").toString().trim().toUpperCase();
+    const tipo=(r["TIPO DE PROPOSTA"]||"").toString().trim().toUpperCase();
+    const obs=(r["OBS."]||r["OBS"]||"").toString().trim();
+    const valAtual=n(r["VALOR CONTRATO ATUAL"]);
+    const valPleito=n(r["VALOR CONTRATO COM REAJUSTE + PLEITO"])||n(r["VALOR CONTRATO COM REAJUSTE"]);
+    const row={
+      isRevisao:(r["REVISÃO"]||r["REVISAO"]||"").toString().toUpperCase().includes("REVIS"),
+      nProposta:(r["Nº PROPOSTA"]||r["N PROPOSTA"]||"").toString().trim(),
       grupoCliente:(r["GRUPO CLIENTE"]||"").toString().trim(),
-      cliente:     (r["CLIENTE"]||"").toString().trim(),
-      respFarmer:  (r["RESP. FARMER"]||"").toString().trim(),
-      respHunter:  (r["RESP. HUNTER"]||"").toString().trim(),
-      atividade: ativ, tipoProposta: tipo, obs,
-      valAtual, valPleito, diferenca: valPleito - valAtual,
-      pctReaj:   n(r["REAJUSTE CONTRATUAL (%)"]),
-      pctPleito: n(r["PLEITO (%)"]),
-      aprovR:    n(r["REAJUSTE  APROVADO PELO CLIENTE (R$)"]||r["REAJUSTE APROVADO PELO CLIENTE (R$)"]),
-      aprovPct:  n(r["REAJUSTE APROVADO PELO CLIENTE (%)"]),
-      retroativo:n(r["RETROATIVO"]),
-      valorProposta:n(r["VALOR PROPOSTA"]),
-      status:    (r["STATUS"]||"").toString().trim(),
-      mes:       (r["Mês"]||r["MES"]||"").toString().trim(),
-      sinalizacao: matchSin(r["Sinalização clientes (Negociação de reajuste)"]||r["Sinalização"]||""),
-      fezPec:      r["FEZ PEC?"]||r["FEZ PEC"],
-      fezAbertura: r["FEZ ABERTURA DE CUSTOS?"]||r["FEZ ABERTURA"],
-      fezProposta: r["FEZ PROPOSTA COMERCIAL?"]||r["FEZ PROPOSTA COMERCIAL"],
-      fezCarta:    r["FEZ CARTA DE REAJUSTE?"]||r["FEZ CARTA DE REAJUSTE"],
-      fezNotif:    r["FEZ CARTA DE NOTIFICAÇÃO?"]||r["FEZ NOTIF"],
+      cliente:(r["CLIENTE"]||"").toString().trim(),
+      respFarmer:(r["RESP. FARMER"]||"").toString().trim(),
+      respHunter:(r["RESP. HUNTER"]||"").toString().trim(),
+      atividade:ativ,tipoProposta:tipo,obs,
+      valAtual,valPleito,diferenca:valPleito-valAtual,
+      pctReaj:n(r["REAJUSTE CONTRATUAL (%)"]),
+      pctPleito:n(r["PLEITO (%)"]),
+      aprovR:n(r["REAJUSTE APROVADO PELO CLIENTE (R$)"]||r["REAJUSTE  APROVADO PELO CLIENTE (R$)"]),
+      aprovPct:n(r["REAJUSTE APROVADO PELO CLIENTE (%)"]),
+      status:(r["STATUS"]||"").toString().trim(),
+      mes:(r["Mês"]||r["MES"]||"").toString().trim(),
+      sinalizacao:matchSin(r["Sinalização clientes (Negociação de reajuste)"]||r["Sinalização"]||""),
+      fezPec:r["FEZ PEC?"]||r["FEZ PEC"],
+      fezAbertura:r["FEZ ABERTURA DE CUSTOS?"]||r["FEZ ABERTURA"],
+      fezProposta:r["FEZ PROPOSTA COMERCIAL?"]||r["FEZ PROPOSTA COMERCIAL"],
+      fezCarta:r["FEZ CARTA DE REAJUSTE?"]||r["FEZ CARTA DE REAJUSTE"],
+      fezNotif:r["FEZ CARTA DE NOTIFICAÇÃO?"]||r["FEZ NOTIF"],
     };
-    row.responsavel = matchPessoa(row.respFarmer, row.respHunter);
-    row.categoria   = matchCat(ativ, tipo);
-    row.entregaveis = matchEnt(row);
+    row.responsavel=matchPessoa(row.respFarmer,row.respHunter);
+    row.categoria=matchCat(ativ,tipo);
+    row.entregaveis=matchEnt(row);
     return row;
   }).filter(r=>r.responsavel);
 };
 
-// ─── UI helpers ──────────────────────────────────────────────────────
 const Bar = ({p,color}) => (
   <div style={{flex:1,height:5,background:"#1A1A22",borderRadius:3,overflow:"hidden"}}>
     <div style={{width:`${Math.min(p,100)}%`,height:"100%",background:color,borderRadius:3,transition:"width .4s"}}/>
@@ -134,42 +138,27 @@ const SecLabel = ({children}) => (
 );
 
 export default function FarmDashboard() {
-  const [data,setData]   = useState([]);
-  const [view,setView]   = useState("visao");
-  const [fResp,setFResp] = useState("Todos");
-  const [fStat,setFStat] = useState("Todos");
-  const [fCat,setFCat]   = useState("Todas");
-  const [fSin,setFSin]   = useState("Todos");
-  const [loading,setLd]  = useState(true);
-  const [error,setErr]   = useState(null);
-  const [lastUpdate,setLU] = useState(null);
+  const [data,setData]=useState([]);
+  const [view,setView]=useState("visao");
+  const [fResp,setFResp]=useState("Todos");
+  const [fStat,setFStat]=useState("Todos");
+  const [fCat,setFCat]=useState("Todas");
+  const [fSin,setFSin]=useState("Todos");
+  const [fileName,setFN]=useState(null);
+  const [loading,setLd]=useState(false);
+  const [drag,setDrag]=useState(false);
+  const [error,setErr]=useState(null);
 
-  // Carrega automaticamente ao abrir
-  useEffect(()=>{
-    const load = async () => {
-      setLd(true); setErr(null);
-      try {
-        const res = await fetch(JSON_URL + "&t=" + Date.now(), {
-          credentials: "include",
-          headers: { "Accept": "application/json;odata=verbose" }
-        });
-        if(!res.ok) throw new Error(`Erro ${res.status}`);
-        const json = await res.json();
-        // SharePoint API retorna dentro de d ou direto
-        const raw = json?.d ? json.d : (Array.isArray(json) ? json : json.value || []);
-        const rows = typeof raw === "string" ? JSON.parse(raw) : raw;
-        setData(processRows(rows));
-        setLU(new Date().toLocaleString("pt-BR"));
-      } catch(e) {
-        setErr(e.message||"Erro ao carregar dados.");
-      } finally { setLd(false); }
-    };
-    load();
+  const load=useCallback(async(file)=>{
+    setLd(true);setErr(null);
+    try{setData(processRows(await parseExcel(file)));setFN(file.name);}
+    catch{setErr("Erro ao ler o arquivo. Verifique se é um .xlsx válido.");}
+    finally{setLd(false);}
   },[]);
 
-  const ativs = data.filter(r=>!r.isRevisao);
-  const revs  = data.filter(r=> r.isRevisao);
-  const analistasAtivs = ativs.filter(r=>ANALISTAS.includes(r.responsavel));
+  const ativs=data.filter(r=>!r.isRevisao);
+  const revs=data.filter(r=>r.isRevisao);
+  const analistasAtivs=ativs.filter(r=>ANALISTAS.includes(r.responsavel));
 
   const applyStatus=(rows)=>{
     if(fStat==="Aprovado")      return rows.filter(r=>r.status.toUpperCase().includes("APROVADO"));
@@ -205,17 +194,21 @@ export default function FarmDashboard() {
 
   const filtHistorico=filterRows(data);
 
-    return (
+  return (
     <div style={{minHeight:"100vh",background:"#0D0D0F",color:"#F0EDE8",fontFamily:"'Georgia',serif"}}>
-
-      {/* HEADER */}
       <div style={{borderBottom:"1px solid #1E1E24",padding:"16px 28px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
         <div>
           <div style={{fontSize:10,letterSpacing:4,color:"#5A5A5A",textTransform:"uppercase",marginBottom:2}}>Time Comercial</div>
           <div style={{fontSize:20}}>Farm <span style={{color:"#C8A96E"}}>Performance</span></div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-          {lastUpdate&&<div style={{fontSize:10,color:"#4A4A4A",background:"#13131A",border:"1px solid #1E1E24",padding:"4px 10px"}}>🔄 Atualizado: {lastUpdate}</div>}
+          {fileName&&<div style={{fontSize:10,color:"#4A4A4A",background:"#13131A",border:"1px solid #1E1E24",padding:"4px 10px"}}>📄 {fileName}</div>}
+          <label style={{cursor:"pointer"}}>
+            <input type="file" accept=".xlsx,.xls" onChange={e=>{const f=e.target.files[0];if(f)load(f);}} style={{display:"none"}}/>
+            <div style={{padding:"6px 16px",border:"1px solid #C8A96E",color:"#C8A96E",fontSize:10,letterSpacing:2,textTransform:"uppercase",cursor:"pointer"}}>
+              {fileName?"Trocar Planilha":"Carregar Planilha"}
+            </div>
+          </label>
           {[["visao","Visão Geral"],["tempo","Esforço"],["clientes","Por Cliente"],["historico","Histórico"]].map(([v,l])=>(
             <Btn key={v} label={l} active={view===v} onClick={()=>setView(v)}/>
           ))}
@@ -223,42 +216,36 @@ export default function FarmDashboard() {
       </div>
 
       <div style={{padding:"22px 28px"}}>
-
-        {loading&&(
-          <div style={{textAlign:"center",padding:"80px 0"}}>
-            <div style={{fontSize:34,marginBottom:16}}>⏳</div>
-            <div style={{fontSize:14,color:"#C8A96E"}}>Carregando dados do SharePoint...</div>
-            <div style={{fontSize:11,color:"#4A4A4A",marginTop:8}}>Certifique-se de estar logado com sua conta Microsoft corporativa.</div>
+        {!fileName&&(
+          <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
+            onDrop={e=>{e.preventDefault();setDrag(false);const f=e.dataTransfer.files[0];if(f)load(f);}}
+            style={{border:`2px dashed ${drag?"#C8A96E":"#2A2A2E"}`,background:drag?"#C8A96E08":"#13131A",padding:"70px 40px",textAlign:"center",cursor:"pointer"}}>
+            <label style={{cursor:"pointer"}}>
+              <input type="file" accept=".xlsx,.xls" onChange={e=>{const f=e.target.files[0];if(f)load(f);}} style={{display:"none"}}/>
+              <div style={{fontSize:34,marginBottom:12}}>📊</div>
+              <div style={{fontSize:14,color:"#C8A96E",marginBottom:6}}>Arraste sua planilha Excel aqui</div>
+              <div style={{fontSize:11,color:"#4A4A4A"}}>ou clique em "Carregar Planilha" — aba "Dados" será lida automaticamente</div>
+            </label>
           </div>
         )}
+        {loading&&<div style={{textAlign:"center",padding:"60px 0",color:"#C8A96E"}}>Lendo planilha...</div>}
+        {error&&<div style={{background:"#2A1010",border:"1px solid #5A2020",padding:"12px 18px",color:"#E87C7C",fontSize:13}}>{error}</div>}
 
-        {error&&error!=="login"&&(
-          <div style={{background:"#2A1010",border:"1px solid #5A2020",padding:"16px 20px",color:"#E87C7C",fontSize:13,textAlign:"center"}}>
-            <div style={{marginBottom:8}}>❌ {error}</div>
-            <div style={{fontSize:11,color:"#8A4A4A"}}>Verifique sua conexão e se está logado no SharePoint da empresa.</div>
-            <button onClick={()=>window.location.reload()} style={{marginTop:12,padding:"6px 16px",background:"transparent",border:"1px solid #E87C7C",color:"#E87C7C",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
-              Tentar novamente
-            </button>
-          </div>
-        )}
-
-        {/* ══ VISÃO GERAL ══════════════════════════════════════════════ */}
-        {!loading&&!error&&view==="visao"&&(()=>{
+        {/* VISÃO GERAL */}
+        {fileName&&!loading&&view==="visao"&&(()=>{
           const scopeAll=applyStatus(ativs);
           const scopeCat=(cat)=>scopeAll.filter(r=>r.categoria===cat);
           const cStats=clienteStats();
-          return (
+          return(
             <div>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18,flexWrap:"wrap"}}>
                 <span style={{fontSize:10,letterSpacing:2,color:"#5A5A5A",textTransform:"uppercase"}}>Status:</span>
                 {["Todos","Aprovado","Em Negociação"].map(s=><Btn key={s} label={s} active={fStat===s} onClick={()=>setFStat(s)}/>)}
               </div>
-
               <SecLabel>Totais do Time</SecLabel>
               <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:28}}>
                 {[
-                  {l:"Atividades",v:scopeAll.length},
-                  {l:"Revisões",v:revs.length},
+                  {l:"Atividades",v:scopeAll.length},{l:"Revisões",v:revs.length},
                   {l:"Valor Atual",v:fmt(scopeAll.reduce((s,r)=>s+r.valAtual,0))},
                   {l:"Valor c/ Pleito",v:fmt(scopeAll.reduce((s,r)=>s+r.valPleito,0))},
                   {l:"Diferença (Ganho)",v:fmt(scopeAll.reduce((s,r)=>s+r.diferenca,0))},
@@ -269,14 +256,13 @@ export default function FarmDashboard() {
                   </div>
                 ))}
               </div>
-
               <SecLabel>Analistas</SecLabel>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:32}}>
                 {ANALISTAS.map(p=>{
                   const sp=applyStatus(ativs.filter(r=>r.responsavel===p));
                   const revP=revs.filter(r=>r.responsavel===p);
                   const aprov=ativs.filter(r=>r.responsavel===p&&r.status.toUpperCase().includes("APROVADO"));
-                  return (
+                  return(
                     <div key={p} style={{background:"#13131A",border:`1px solid ${COLORS[p]}33`,padding:20}}>
                       <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}>
                         <div>
@@ -290,15 +276,15 @@ export default function FarmDashboard() {
                       </div>
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:14}}>
                         <Mini label="Contrato Atual" val={fmt(sp.reduce((s,r)=>s+r.valAtual,0))}/>
-                        <Mini label="Com Pleito"     val={fmt(sp.reduce((s,r)=>s+r.valPleito,0))}/>
-                        <Mini label="Diferença"      val={fmt(sp.reduce((s,r)=>s+r.diferenca,0))} highlight/>
+                        <Mini label="Com Pleito" val={fmt(sp.reduce((s,r)=>s+r.valPleito,0))}/>
+                        <Mini label="Diferença" val={fmt(sp.reduce((s,r)=>s+r.diferenca,0))} highlight/>
                       </div>
                       <div style={{borderTop:"1px solid #1A1A20",paddingTop:12}}>
                         <div style={{fontSize:9,letterSpacing:2,color:"#4A4A4A",textTransform:"uppercase",marginBottom:8}}>Por Tipo</div>
                         {CAT_COM.map(cat=>{
                           const d=sp.filter(r=>r.categoria===cat);
                           if(!d.length) return null;
-                          return (
+                          return(
                             <div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                               <div style={{display:"flex",alignItems:"center",gap:6}}>
                                 <div style={{width:7,height:7,borderRadius:"50%",background:CAT_COM_C[cat]}}/>
@@ -316,51 +302,44 @@ export default function FarmDashboard() {
                   );
                 })}
               </div>
-
               <SecLabel>Resultados por Categoria — Time Completo</SecLabel>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:32}}>
-                {(()=>{
-                  const d=scopeCat("Reajuste"),rc=revs.filter(r=>r.categoria==="Reajuste");
-                  return (
-                    <div style={{background:"#13131A",border:`1px solid ${CAT_COM_C["Reajuste"]}44`,padding:20}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-                        <div style={{width:9,height:9,borderRadius:"50%",background:CAT_COM_C["Reajuste"]}}/>
-                        <div style={{fontSize:15,color:CAT_COM_C["Reajuste"]}}>Reajuste</div>
-                      </div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-                        <Mini label="Quantidade" val={d.length}/><Mini label="Revisões" val={rc.length}/>
-                        <Mini label="Val. Mensal Atual" val={fmt(d.reduce((s,r)=>s+r.valAtual,0))}/>
-                        <Mini label="Val. c/ Reajuste" val={fmt(d.reduce((s,r)=>s+r.valPleito,0))}/>
-                      </div>
-                      <div style={{background:"#0D0D0F",padding:"8px 12px"}}>
-                        <div style={{fontSize:8,letterSpacing:2,color:"#4A4A4A",textTransform:"uppercase",marginBottom:3}}>Aumento do Contrato</div>
-                        <div style={{fontSize:16,color:"#C8A96E"}}>{fmt(d.reduce((s,r)=>s+r.diferenca,0))}</div>
-                      </div>
+                {(()=>{const d=scopeCat("Reajuste"),rc=revs.filter(r=>r.categoria==="Reajuste");return(
+                  <div style={{background:"#13131A",border:`1px solid ${CAT_COM_C["Reajuste"]}44`,padding:20}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+                      <div style={{width:9,height:9,borderRadius:"50%",background:CAT_COM_C["Reajuste"]}}/>
+                      <div style={{fontSize:15,color:CAT_COM_C["Reajuste"]}}>Reajuste</div>
                     </div>
-                  );
-                })()}
-                {(()=>{
-                  const d=scopeCat("Defesa de Território"),rc=revs.filter(r=>r.categoria==="Defesa de Território");
-                  return (
-                    <div style={{background:"#13131A",border:`1px solid ${CAT_COM_C["Defesa de Território"]}44`,padding:20}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-                        <div style={{width:9,height:9,borderRadius:"50%",background:CAT_COM_C["Defesa de Território"]}}/>
-                        <div style={{fontSize:15,color:CAT_COM_C["Defesa de Território"]}}>Defesa de Território</div>
-                      </div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                        <Mini label="Quantidade" val={d.length}/><Mini label="Revisões" val={rc.length}/>
-                        <Mini label="Val. Mensal Contrato" val={fmt(d.reduce((s,r)=>s+r.valAtual,0))}/>
-                        <Mini label="Aumento do Contrato" val={fmt(d.reduce((s,r)=>s+r.diferenca,0))} highlight/>
-                      </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+                      <Mini label="Quantidade" val={d.length}/><Mini label="Revisões" val={rc.length}/>
+                      <Mini label="Val. Mensal Atual" val={fmt(d.reduce((s,r)=>s+r.valAtual,0))}/>
+                      <Mini label="Val. c/ Reajuste" val={fmt(d.reduce((s,r)=>s+r.valPleito,0))}/>
                     </div>
-                  );
-                })()}
+                    <div style={{background:"#0D0D0F",padding:"8px 12px"}}>
+                      <div style={{fontSize:8,letterSpacing:2,color:"#4A4A4A",textTransform:"uppercase",marginBottom:3}}>Aumento do Contrato</div>
+                      <div style={{fontSize:16,color:"#C8A96E"}}>{fmt(d.reduce((s,r)=>s+r.diferenca,0))}</div>
+                    </div>
+                  </div>
+                );})()}
+                {(()=>{const d=scopeCat("Defesa de Território"),rc=revs.filter(r=>r.categoria==="Defesa de Território");return(
+                  <div style={{background:"#13131A",border:`1px solid ${CAT_COM_C["Defesa de Território"]}44`,padding:20}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+                      <div style={{width:9,height:9,borderRadius:"50%",background:CAT_COM_C["Defesa de Território"]}}/>
+                      <div style={{fontSize:15,color:CAT_COM_C["Defesa de Território"]}}>Defesa de Território</div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      <Mini label="Quantidade" val={d.length}/><Mini label="Revisões" val={rc.length}/>
+                      <Mini label="Val. Mensal" val={fmt(d.reduce((s,r)=>s+r.valAtual,0))}/>
+                      <Mini label="Aumento" val={fmt(d.reduce((s,r)=>s+r.diferenca,0))} highlight/>
+                    </div>
+                  </div>
+                );})()}
                 {(()=>{
                   const cats=["Up Selling","Alteração de Escopo","Renovação"];
                   const d=scopeAll.filter(r=>cats.includes(r.categoria));
                   const rc=revs.filter(r=>cats.includes(r.categoria));
                   const spot=d.filter(r=>(r.tipoProposta||"").toUpperCase().includes("SPOT")).length;
-                  return (
+                  return(
                     <div style={{background:"#13131A",border:`1px solid ${CAT_COM_C["Up Selling"]}44`,padding:20}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
                         <div style={{width:9,height:9,borderRadius:"50%",background:CAT_COM_C["Up Selling"]}}/>
@@ -385,12 +364,11 @@ export default function FarmDashboard() {
                   );
                 })()}
               </div>
-
               <SecLabel>Sinalização de Clientes</SecLabel>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
                 {["verde","amarelo","vermelho"].map(sin=>{
                   const list=cStats.filter(c=>c.sin===sin);
-                  return (
+                  return(
                     <div key={sin} style={{background:"#13131A",border:`1px solid ${SIN_C[sin]}44`,padding:18}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                         <div style={{fontSize:13,color:SIN_C[sin]}}>{SIN_LB[sin]}</div>
@@ -414,13 +392,12 @@ export default function FarmDashboard() {
           );
         })()}
 
-        {/* ══ ESFORÇO ══════════════════════════════════════════════════ */}
-        {!loading&&!error&&view==="tempo"&&(
+        {/* ESFORÇO */}
+        {fileName&&!loading&&view==="tempo"&&(
           <div>
             <div style={{marginBottom:22}}>
               <SecLabel>Analistas — Esforço</SecLabel>
               <div style={{fontSize:18}}>Onde o Time <span style={{color:"#C8A96E"}}>Gasta Tempo</span></div>
-              <div style={{fontSize:11,color:"#5A5A5A",marginTop:4}}>Uma atividade pode contar em múltiplas categorias.</div>
             </div>
             <div style={{background:"#13131A",border:"1px solid #1E1E24",padding:20,marginBottom:18}}>
               <div style={{fontSize:10,letterSpacing:3,color:"#5A5A5A",textTransform:"uppercase",marginBottom:12}}>
@@ -445,7 +422,7 @@ export default function FarmDashboard() {
               {ANALISTAS.map(p=>{
                 const rows=analistasAtivs.filter(r=>r.responsavel===p);
                 const cats=contarEnt(rows);
-                return (
+                return(
                   <div key={p} style={{background:"#13131A",border:`1px solid ${COLORS[p]}33`,padding:18}}>
                     <div style={{marginBottom:14}}>
                       <div style={{fontSize:9,letterSpacing:3,color:"#5A5A5A",textTransform:"uppercase",marginBottom:2}}>Analista</div>
@@ -475,11 +452,11 @@ export default function FarmDashboard() {
           </div>
         )}
 
-        {/* ══ POR CLIENTE ══════════════════════════════════════════════ */}
-        {!loading&&!error&&view==="clientes"&&(()=>{
+        {/* POR CLIENTE */}
+        {fileName&&!loading&&view==="clientes"&&(()=>{
           const stats=clienteStats();
           const filtered=fSin==="Todos"?stats:stats.filter(s=>s.sin===fSin);
-          return (
+          return(
             <div>
               <div style={{marginBottom:20}}>
                 <SecLabel>Histórico</SecLabel>
@@ -510,7 +487,7 @@ export default function FarmDashboard() {
                           {l:"Contrato Atual",v:totalAtual>0?fmt(totalAtual):"—"},
                           {l:"Com Pleito",v:totalPleito>0?fmt(totalPleito):"—"},
                           {l:"Diferença",v:totalDif>0?fmt(totalDif):"—",c:"#C8A96E"},
-                          {l:"% Reaj. Contratual",v:avgReaj!=null?fmtPct(avgReaj):"—"},
+                          {l:"% Reaj.",v:avgReaj!=null?fmtPct(avgReaj):"—"},
                           {l:"% Pleito",v:avgPleito!=null?fmtPct(avgPleito):"—"},
                           {l:"% Aceito",v:avgAprov!=null?fmtPct(avgAprov):"—",c:avgAprov!=null?"#4A8A4A":undefined},
                         ].map(i=>(
@@ -529,8 +506,8 @@ export default function FarmDashboard() {
           );
         })()}
 
-        {/* ══ HISTÓRICO ════════════════════════════════════════════════ */}
-        {!loading&&!error&&view==="historico"&&(
+        {/* HISTÓRICO */}
+        {fileName&&!loading&&view==="historico"&&(
           <div>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
               <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
