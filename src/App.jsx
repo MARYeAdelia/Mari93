@@ -13,7 +13,7 @@ const SIN_LB = { verde:"🟢 Boa Negociação",amarelo:"🟡 Moderada",vermelho:
 // ─── URL do JSON no SharePoint ─────────────────────────────────────────────
 // GitHub raw URL — sem restrição de CORS
 
-const JSON_URL = "https://raw.githubusercontent.com/MARYeAdelia/Mari93/main/dados_farmer.json";
+const JSON_URL = "https://gpssacombr.sharepoint.com/sites/BMsGestodeContratos/_api/web/GetFileByServerRelativePath(decodedurl='/sites/BMsGestodeContratos/Documentos%20Compartilhados/Acompamnhamento%20de%20Atividades%20Farmer/Planilha%20-%20Performance%20Farmer/dados_farmer.json')/$value";
 
 const fmt = (v) => (!v&&v!==0)?"—":new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL",maximumFractionDigits:0}).format(v);
 const fmtPct = (v) => (v!=null&&v!==""&&!isNaN(v))?`${(parseFloat(v)*100).toFixed(1)}%`:"—";
@@ -149,7 +149,10 @@ export default function FarmDashboard() {
     const load = async () => {
       setLd(true); setErr(null);
       try {
-        const res = await fetch(JSON_URL + "?t=" + Date.now());
+        const res = await fetch(JSON_URL + "?t=" + Date.now(), {
+  credentials: "include",
+  headers: { "Accept": "application/json" }
+});
         if(!res.ok) throw new Error(`Erro ${res.status}`);
         const json = await res.json();
         const rows = Array.isArray(json) ? json : (json.value || []);
