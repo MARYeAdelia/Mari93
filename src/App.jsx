@@ -81,33 +81,40 @@ const parseExcel = (file) => new Promise((res,rej)=>{
 
 const processRows = (rows) => {
   if(!rows||!rows.length) return [];
+  const keys = Object.keys(rows[0]);
+  const col = (...kws) => keys.find(k => kws.some(kw => k.toUpperCase().replace(/\s+/g," ").trim().includes(kw.toUpperCase()))) || null;
+  const val = (r, ...kws) => { const k=col(...kws); return k ? r[k] : ""; };
+  console.log("Colunas:", keys);
   return rows.map(r=>{
-    const ativ=(r["ATIVIDADE1"]||r["ATIVIDADE"]||"").toString().trim().toUpperCase();
-    const tipo=(r["TIPO DE PROPOSTA"]||"").toString().trim().toUpperCase();
-    const obs=(r["OBS."]||r["OBS"]||"").toString().trim();
-    const valAtual=n(r["VALOR CONTRATO ATUAL"]);
-    const valPleito=n(r["VALOR CONTRATO COM REAJUSTE + PLEITO"])||n(r["VALOR CONTRATO COM REAJUSTE"]);
+    const ativ=(val(r,"ATIVIDADE1")||val(r,"ATIVIDADE")||"").toString().trim().toUpperCase();
+    const tipo=(val(r,"TIPO DE PROPOSTA")||"").toString().trim().toUpperCase();
+    const obs=(val(r,"OBS")||"").toString().trim();
+    const cValAtual = col("VALOR CONTRATO ATUAL");
+    const valAtual = cValAtual ? n(r[cValAtual]) : 0;
+    const cValPleito = col("REAJUSTE + PLEITO","COM REAJUSTE + PLEITO");
+    const cValReaj   = col("VALOR CONTRATO COM REAJUSTE");
+    const valPleito  = (cValPleito ? n(r[cValPleito]) : 0) || (cValReaj ? n(r[cValReaj]) : 0);
     const row={
-      isRevisao:(r["REVISÃO"]||r["REVISAO"]||"").toString().toUpperCase().includes("REVIS"),
-      nProposta:(r["Nº PROPOSTA"]||r["N PROPOSTA"]||"").toString().trim(),
-      grupoCliente:(r["GRUPO CLIENTE"]||"").toString().trim(),
-      cliente:(r["CLIENTE"]||"").toString().trim(),
-      respFarmer:(r["RESP. FARMER"]||"").toString().trim(),
-      respHunter:(r["RESP. HUNTER"]||"").toString().trim(),
-      atividade:ativ,tipoProposta:tipo,obs,
-      valAtual,valPleito,diferenca:valPleito-valAtual,
-      pctReaj:n(r["REAJUSTE CONTRATUAL (%)"]),
-      pctPleito:n(r["PLEITO (%)"]),
-      aprovR:n(r["REAJUSTE APROVADO PELO CLIENTE (R$)"]||r["REAJUSTE  APROVADO PELO CLIENTE (R$)"]),
-      aprovPct:n(r["REAJUSTE APROVADO PELO CLIENTE (%)"]),
-      status:(r["STATUS"]||"").toString().trim(),
-      mes:(r["Mês"]||r["MES"]||"").toString().trim(),
-      sinalizacao:matchSin(r["Sinalização clientes (Negociação de reajuste)"]||r["Sinalização"]||""),
-      fezPec:r["FEZ PEC?"]||r["FEZ PEC"],
-      fezAbertura:r["FEZ ABERTURA DE CUSTOS?"]||r["FEZ ABERTURA"],
-      fezProposta:r["FEZ PROPOSTA COMERCIAL?"]||r["FEZ PROPOSTA COMERCIAL"],
-      fezCarta:r["FEZ CARTA DE REAJUSTE?"]||r["FEZ CARTA DE REAJUSTE"],
-      fezNotif:r["FEZ CARTA DE NOTIFICAÇÃO?"]||r["FEZ NOTIF"],
+      isRevisao:(val(r,"REVISÃO","REVISAO")||"").toString().toUpperCase().includes("REVIS"),
+      nProposta:(val(r,"Nº PROPOSTA","N PROPOSTA","PROPOSTA")||"").toString().trim(),
+      grupoCliente:(val(r,"GRUPO CLIENTE")||"").toString().trim(),
+      cliente:(val(r,"CLIENTE")||"").toString().trim(),
+      respFarmer:(val(r,"RESP. FARMER","RESPONSÁVEL FARMER")||"").toString().trim(),
+      respHunter:(val(r,"RESP. HUNTER","RESPONSÁVEL HUNTER")||"").toString().trim(),
+      atividade:ativ, tipoProposta:tipo, obs,
+      valAtual, valPleito, diferenca: valPleito - valAtual,
+      pctReaj:   n(val(r,"REAJUSTE CONTRATUAL (%)")),
+      pctPleito: n(val(r,"PLEITO (%)")),
+      aprovR:    n(val(r,"APROVADO PELO CLIENTE (R$)")),
+      aprovPct:  n(val(r,"APROVADO PELO CLIENTE (%)")),
+      status:    (val(r,"STATUS")||"").toString().trim(),
+      mes:       (val(r,"Mês","MES")||"").toString().trim(),
+      sinalizacao: matchSin(val(r,"Sinalização","SINALIZACAO","SINALIZ")||""),
+      fezPec:      val(r,"FEZ PEC"),
+      fezAbertura: val(r,"FEZ ABERTURA"),
+      fezProposta: val(r,"FEZ PROPOSTA COMERCIAL"),
+      fezCarta:    val(r,"FEZ CARTA DE REAJUSTE"),
+      fezNotif:    val(r,"FEZ CARTA DE NOTIF","FEZ NOTIF"),
     };
     row.responsavel=matchPessoa(row.respFarmer,row.respHunter);
     row.categoria=matchCat(ativ,tipo);
