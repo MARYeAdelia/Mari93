@@ -114,9 +114,14 @@ const processRows = rawRows => {
     const contratoKey = `${grupo}||${unidade||grupo}||${tipo}||${propBase(nProp)}`;
 
     // Financeiro
-    const valAtual  = num(get(r,"Valor Contrato Atual"));
-    const valPleito = num(get(r,"Valor Final / Pleito"));
-    const diferenca = valPleito - valAtual;
+    // Reajuste / Renovação / Alteração / Defesa → Valor Contrato Atual + Valor Final / Pleito
+    // BID/Cotação / Upselling → Valor Proposta (não há contrato base)
+    const cat = detectCat(tipo);
+    const usaProposta = cat === "BID/Cotação" || cat === "Upselling";
+
+    const valAtual    = usaProposta ? 0                              : num(get(r,"Valor Contrato Atual"));
+    const valPleito   = usaProposta ? num(get(r,"Valor Proposta","VALOR PROPOSTA")) : num(get(r,"Valor Final / Pleito"));
+    const diferenca   = valPleito - valAtual;
     const valProposta = num(get(r,"Valor Proposta","VALOR PROPOSTA"));
 
     // Percentuais (armazenados em decimal: 0.065 = 6,5%)
@@ -261,7 +266,7 @@ export default function FarmDashboard() {
 
   // Motor financeiro: última revisão por contrato, só farmer, com valor
   const ultimasFarmer = ultimaPorContrato(
-    filtraStatus(periodoData).filter(r => r.eFarmer && r.valAtual > 0)
+    filtraStatus(periodoData).filter(r => r.eFarmer && (r.valAtual > 0 || r.valPleito > 0))
   );
 
   // Stats por grupo cliente
@@ -273,7 +278,7 @@ export default function FarmDashboard() {
       if (!by[r.grupo].sin && r.semaforo) by[r.grupo].sin = r.semaforo;
     });
     return Object.entries(by).map(([grupo,{rows,sin}]) => {
-      const ults  = ultimaPorContrato(filtraStatus(rows).filter(r=>r.eFarmer&&r.valAtual>0));
+      const ults  = ultimaPorContrato(filtraStatus(rows).filter(r=>r.eFarmer&&(r.valAtual>0||r.valPleito>0)));
       const somaA = ults.reduce((s,r)=>s+r.valAtual,0);
       const somaP = ults.reduce((s,r)=>s+r.valPleito,0);
       const taxa  = somaA>0 ? (somaP-somaA)/somaA : null;
@@ -376,7 +381,7 @@ export default function FarmDashboard() {
               <Sec>Analistas</Sec>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:32}}>
                 {ANALISTAS.filter(p=>periodoData.some(r=>r.responsavel===p)).map(p=>{
-                  const ultP  = ultimaPorContrato(filtraStatus(periodoData).filter(r=>r.responsavel===p&&r.eFarmer&&r.valAtual>0));
+                  const ultP  = ultimaPorContrato(filtraStatus(periodoData).filter(r=>r.responsavel===p&&r.eFarmer&&(r.valAtual>0||r.valPleito>0)));
                   const somaA = ultP.reduce((s,r)=>s+r.valAtual,0);
                   const somaP = ultP.reduce((s,r)=>s+r.valPleito,0);
                   const aprov = ultP.filter(r=>r.status.toUpperCase().includes("APROVADO")).length;
@@ -436,7 +441,7 @@ export default function FarmDashboard() {
                   <Sec>Liderança</Sec>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:16,marginBottom:32}}>
                     {LIDERANCA.filter(p=>periodoData.some(r=>r.responsavel===p)).map(p=>{
-                      const ultP  = ultimaPorContrato(filtraStatus(periodoData).filter(r=>r.responsavel===p&&r.eFarmer&&r.valAtual>0));
+                      const ultP  = ultimaPorContrato(filtraStatus(periodoData).filter(r=>r.responsavel===p&&r.eFarmer&&(r.valAtual>0||r.valPleito>0)));
                       const somaA = ultP.reduce((s,r)=>s+r.valAtual,0);
                       const somaP = ultP.reduce((s,r)=>s+r.valPleito,0);
                       const aprov = ultP.filter(r=>r.status.toUpperCase().includes("APROVADO")).length;
@@ -644,9 +649,9 @@ export default function FarmDashboard() {
                                 <TD color="#F0EDE8">{u.unidade}</TD>
                                 <td style={{padding:"6px 10px"}}><Tag label={u.categoria} color={COR_CAT[u.categoria]||"#5A5A5A"}/></td>
                                 <TD color="#5A5A5A" right>{u.nRev}</TD>
-                                <TD right color="#8A8A8A">{u.valAtual>0?brl(u.valAtual):"—"}</TD>
+                                <TD right color="#8A8A8A">{u.valAtual>0?brl(u.valAtual):u.valPleito>0?"—":"—"}</TD>
                                 <TD right>{u.valPleito>0?brl(u.valPleito):"—"}</TD>
-                                <TD right color={ganho>0?"#C8A96E":"#5A5A5A"}>{ganho>0?brl(ganho):"—"}</TD>
+                                <TD right color={u.diferenca>0?"#C8A96E":"#5A5A5A"}>{u.diferenca>0?brl(u.diferenca):"—"}</TD>
                                 <TD right color="#7A7A9A">{pctReaj!=null?pct(pctReaj):"—"}</TD>
                                 <TD right color="#A8E87C">{u.pctAceito>0?pct(u.pctAceito):"—"}</TD>
                                 <td style={{padding:"6px 10px"}}>
