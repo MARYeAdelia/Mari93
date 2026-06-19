@@ -1,6 +1,12 @@
 import { useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 
+// Barlow font for header
+const _barlowLink = document.createElement("link");
+_barlowLink.rel = "stylesheet";
+_barlowLink.href = "https://fonts.googleapis.com/css2?family=Barlow:wght@400;700&display=swap";
+document.head.appendChild(_barlowLink);
+
 // ─── EQUIPE ────────────────────────────────────────────────────────────────
 const ANALISTAS = ["MARIANA","WILDER","GIOVANNI"];
 const LIDERANCA = ["CARLA","DARLAN"];
@@ -117,7 +123,7 @@ const processRows = rawRows => {
     // Reajuste / Renovação / Alteração / Defesa → Valor Contrato Atual + Valor Final / Pleito
     // BID/Cotação / Upselling → Valor Proposta (não há contrato base)
     const cat = detectCat(tipo);
-    const usaProposta = cat === "BID/Cotação" || cat === "Upselling";
+    const usaProposta = cat === "BID/Cotação" || cat === "Upselling" || cat === "Alteração de Escopo";
 
     const valAtual    = usaProposta ? 0                              : num(get(r,"Valor Contrato Atual"));
     const valPleito   = usaProposta ? num(get(r,"Valor Proposta","VALOR PROPOSTA")) : num(get(r,"Valor Final / Pleito"));
@@ -206,6 +212,8 @@ export default function FarmDashboard() {
   const [fStat,   setFStat]   = useState("Todos");
   const [fCat,    setFCat]    = useState("Todas");
   const [fSin,    setFSin]    = useState("Todos");
+  const [fEscopo, setFEscopo] = useState("Todos");
+  const [fAnalista,setFAnalista]= useState("Todos");
   const [fMes,    setFMes]    = useState("Todos");
   const [fSemana, setFSemana] = useState("Todas");
   const [arquivo, setArquivo] = useState(null);
@@ -270,7 +278,7 @@ export default function FarmDashboard() {
   );
 
   // Stats por grupo cliente
-  const statsGrupos = () => {
+  const statsGrupos = (escopo="Todos", analista="Todos") => {
     const by = {};
     periodoData.forEach(r => {
       if (!by[r.grupo]) by[r.grupo] = { rows:[], sin:null };
@@ -278,12 +286,16 @@ export default function FarmDashboard() {
       if (!by[r.grupo].sin && r.semaforo) by[r.grupo].sin = r.semaforo;
     });
     return Object.entries(by).map(([grupo,{rows,sin}]) => {
-      const ults  = ultimaPorContrato(filtraStatus(rows).filter(r=>r.eFarmer&&(r.valAtual>0||r.valPleito>0)));
+      let base = filtraStatus(rows).filter(r => r.valAtual > 0 || r.valPleito > 0);
+      if (escopo === "Farmer")      base = base.filter(r => r.eFarmer);
+      else if (escopo === "Hunter") base = base.filter(r => !r.eFarmer);
+      if (analista !== "Todos")     base = base.filter(r => r.responsavel === analista);
+      const ults  = ultimaPorContrato(base);
       const somaA = ults.reduce((s,r)=>s+r.valAtual,0);
       const somaP = ults.reduce((s,r)=>s+r.valPleito,0);
-      const taxa  = somaA>0 ? (somaP-somaA)/somaA : null;
-      return { grupo, rows, sin, ults, somaAtual:somaA, somaPleito:somaP, somaDif:somaP-somaA, taxa };
-    }).sort((a,b)=>b.rows.length-a.rows.length);
+      const allRows = analista !== "Todos" ? rows.filter(r => r.responsavel === analista) : rows;
+      return { grupo, rows: allRows, sin, ults, somaAtual:somaA, somaPleito:somaP, somaDif:somaP-somaA };
+    }).filter(g => g.ults.length > 0).sort((a,b)=>b.rows.length-a.rows.length);
   };
 
   const contarEnt = rows => {
@@ -299,9 +311,19 @@ export default function FarmDashboard() {
       {/* HEADER */}
       <div style={{borderBottom:"1px solid #1E1E24",padding:"16px 28px",display:"flex",
                    alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
-        <div>
-          <div style={{fontSize:10,letterSpacing:4,color:"#5A5A5A",textTransform:"uppercase",marginBottom:2}}>Time Comercial</div>
-          <div style={{fontSize:20}}>Farm <span style={{color:"#C8A96E"}}>Performance</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:20}}>
+          {/* Logo Grupo GPS */}
+          <div style={{display:"flex",alignItems:"baseline",gap:7,fontFamily:"'Barlow',sans-serif"}}>
+            <span style={{fontSize:13,fontWeight:400,letterSpacing:3,color:"#8A8A9A",textTransform:"uppercase"}}>Grupo</span>
+            <span style={{fontSize:26,fontWeight:700,color:"#F0EDE8",letterSpacing:1}}>GPS</span>
+          </div>
+          {/* Divisor */}
+          <div style={{width:1,height:32,background:"#2A2A2E"}}/>
+          {/* Farm Performance */}
+          <div>
+            <div style={{fontSize:10,letterSpacing:4,color:"#5A5A5A",textTransform:"uppercase",marginBottom:2}}>Time Comercial</div>
+            <div style={{fontSize:20}}>Farm <span style={{color:"#C8A96E"}}>Performance</span></div>
+          </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           {arquivo&&<div style={{fontSize:10,color:"#4A4A4A",background:"#13131A",border:"1px solid #1E1E24",padding:"4px 10px"}}>📄 {arquivo}</div>}
@@ -477,7 +499,7 @@ export default function FarmDashboard() {
               <Sec>Semáforo de Clientes</Sec>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
                 {["Verde","Amarelo","Vermelho"].map(sin=>{
-                  const grupos=statsGrupos().filter(g=>g.sin===sin);
+                  const grupos=statsGrupos("Farmer","Todos").filter(g=>g.sin===sin);
                   return (
                     <div key={sin} style={{background:"#13131A",border:`1px solid ${SIN_COR[sin]}44`,padding:18}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -566,22 +588,32 @@ export default function FarmDashboard() {
 
         {/* ══ POR CLIENTE ══════════════════════════════════════════════ */}
         {arquivo&&!loading&&view==="clientes"&&(()=>{
-          const stats   =statsGrupos();
+          const stats   =statsGrupos(fEscopo, fAnalista);
           const filtered=fSin==="Todos"?stats:stats.filter(g=>g.sin===fSin);
-          const TH=({children,right})=>(
-            <th style={{textAlign:right?"right":"left",padding:"5px 10px",fontSize:8,letterSpacing:2,
-                        color:"#4A4A4A",textTransform:"uppercase",whiteSpace:"nowrap",fontWeight:"normal",
-                        borderBottom:"1px solid #111116"}}>{children}</th>
-          );
-          const TD=({children,color,right})=>(
-            <td style={{padding:"6px 10px",fontSize:11,textAlign:right?"right":"left",
-                        color:color||"#C8C8C8",whiteSpace:"nowrap",fontVariantNumeric:"tabular-nums"}}>{children||"—"}</td>
-          );
           return (
             <div>
               <div style={{marginBottom:20}}>
                 <Sec>Por Cliente</Sec>
                 <div style={{fontSize:18}}>Performance <span style={{color:"#C8A96E"}}>por Grupo</span></div>
+              </div>
+              {/* Filtros Escopo + Analista */}
+              <div style={{display:"flex",gap:14,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+                <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                  <span style={{fontSize:9,letterSpacing:2,color:"#5A5A5A",textTransform:"uppercase"}}>Escopo:</span>
+                  {["Todos","Farmer","Hunter"].map(e=>(
+                    <Btn key={e} label={e} active={fEscopo===e}
+                         color={e==="Farmer"?"#4A8A4A":e==="Hunter"?"#3A6A8A":"#C8A96E"}
+                         onClick={()=>setFEscopo(e)}/>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
+                  <span style={{fontSize:9,letterSpacing:2,color:"#5A5A5A",textTransform:"uppercase"}}>Analista:</span>
+                  {["Todos",...EQUIPE.filter(p=>periodoData.some(r=>r.responsavel===p))].map(p=>(
+                    <Btn key={p} label={p==="Todos"?"Todos":p[0]+p.slice(1).toLowerCase()}
+                         active={fAnalista===p} color={COR[p]||"#C8A96E"}
+                         onClick={()=>setFAnalista(p)}/>
+                  ))}
+                </div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18,flexWrap:"wrap"}}>
                 <span style={{fontSize:9,letterSpacing:2,color:"#5A5A5A",textTransform:"uppercase"}}>Semáforo:</span>
@@ -592,7 +624,7 @@ export default function FarmDashboard() {
                 <span style={{marginLeft:"auto",fontSize:11,color:"#5A5A5A"}}>{filtered.length} grupos</span>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                {filtered.map(({grupo,rows,sin,ults,somaAtual,somaPleito,somaDif,taxa})=>(
+                {filtered.map(({grupo,rows,sin,ults,somaAtual,somaPleito,somaDif})=>(
                   <div key={grupo} style={{background:"#13131A",border:"1px solid #1E1E24",
                                            borderLeft:`3px solid ${sin?SIN_COR[sin]:"#2A2A2E"}`}}>
                     {/* Cabeçalho */}
@@ -611,8 +643,7 @@ export default function FarmDashboard() {
                           {[
                             {l:"Total Atual",  v:brl(somaAtual)},
                             {l:"Total Pleito", v:brl(somaPleito)},
-                            {l:"Ganho",        v:brl(somaDif),              c:"#C8A96E"},
-                            {l:"% Ponderado",  v:taxa!=null?pct(taxa):"—",  c:"#A8E87C"},
+                            {l:"Ganho",        v:brl(somaDif), c:"#C8A96E"},
                           ].map(i=>(
                             <div key={i.l} style={{textAlign:"right"}}>
                               <div style={{fontSize:8,letterSpacing:2,color:"#4A4A4A",textTransform:"uppercase",marginBottom:2}}>{i.l}</div>
@@ -627,15 +658,19 @@ export default function FarmDashboard() {
                       <table style={{width:"100%",borderCollapse:"collapse"}}>
                         <thead>
                           <tr style={{background:"#0D0D0F"}}>
-                            <TH>Unidade / Filial</TH>
-                            <TH>Tipo</TH>
-                            <TH>Rev.</TH>
-                            <TH right>Contrato Atual</TH>
-                            <TH right>Com Pleito</TH>
-                            <TH right>Ganho</TH>
-                            <TH right>% Reajuste</TH>
-                            <TH right>% Aceito</TH>
-                            <TH>Status</TH>
+                            {["Unidade / Filial","Tipo"].map(h=>(
+                              <th key={h} style={{textAlign:"left",padding:"5px 10px",fontSize:8,letterSpacing:2,
+                                  color:"#4A4A4A",textTransform:"uppercase",whiteSpace:"nowrap",fontWeight:"normal",
+                                  borderBottom:"1px solid #111116"}}>{h}</th>
+                            ))}
+                            {["Rev.","Contrato Atual","Com Pleito","Ganho","% Reajuste","% Aceito"].map(h=>(
+                              <th key={h} style={{textAlign:"right",padding:"5px 10px",fontSize:8,letterSpacing:2,
+                                  color:"#4A4A4A",textTransform:"uppercase",whiteSpace:"nowrap",fontWeight:"normal",
+                                  borderBottom:"1px solid #111116"}}>{h}</th>
+                            ))}
+                            <th style={{textAlign:"left",padding:"5px 10px",fontSize:8,letterSpacing:2,
+                                color:"#4A4A4A",textTransform:"uppercase",whiteSpace:"nowrap",fontWeight:"normal",
+                                borderBottom:"1px solid #111116"}}>Status</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -644,16 +679,36 @@ export default function FarmDashboard() {
                             const pctReaj=u.valAtual>0?ganho/u.valAtual:null;
                             const isAprov=u.status.toUpperCase().includes("APROVADO");
                             const isRecus=u.status.toUpperCase().includes("RECUS");
+                            const temObs =u.obs&&u.obs.trim()!=="";
+                            const tdL = (content, color) => ({padding:"6px 10px",fontSize:11,color:color||"#C8C8C8",whiteSpace:"nowrap"});
+                            const tdR = (color) => ({padding:"6px 10px",fontSize:11,textAlign:"right",color:color||"#C8C8C8",whiteSpace:"nowrap",fontVariantNumeric:"tabular-nums"});
                             return (
                               <tr key={i} style={{borderBottom:"1px solid #111116",background:i%2===0?"#13131A":"#111118"}}>
-                                <TD color="#F0EDE8">{u.unidade}</TD>
+                                <td style={{padding:"6px 10px"}}>
+                                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                    <span style={{color:"#F0EDE8",fontSize:11}}>{u.unidade}</span>
+                                    {temObs&&(
+                                      <span style={{position:"relative",display:"inline-block",cursor:"default"}}
+                                            onMouseEnter={e=>{const t=e.currentTarget.querySelector(".obs-tip");if(t)t.style.display="block";}}
+                                            onMouseLeave={e=>{const t=e.currentTarget.querySelector(".obs-tip");if(t)t.style.display="none";}}>
+                                        <span style={{fontSize:9,color:"#5A5A7A",border:"1px solid #3A3A5A",padding:"1px 5px",borderRadius:2,userSelect:"none"}}>obs</span>
+                                        <div className="obs-tip" style={{
+                                          display:"none",position:"absolute",bottom:"calc(100% + 6px)",left:0,
+                                          background:"#1A1A26",border:"1px solid #3A3A5A",padding:"8px 12px",
+                                          fontSize:11,color:"#C8C8E8",whiteSpace:"pre-wrap",zIndex:99,
+                                          minWidth:220,maxWidth:320,lineHeight:1.5,boxShadow:"0 4px 16px #00000066"
+                                        }}>{u.obs}</div>
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
                                 <td style={{padding:"6px 10px"}}><Tag label={u.categoria} color={COR_CAT[u.categoria]||"#5A5A5A"}/></td>
-                                <TD color="#5A5A5A" right>{u.nRev}</TD>
-                                <TD right color="#8A8A8A">{u.valAtual>0?brl(u.valAtual):u.valPleito>0?"—":"—"}</TD>
-                                <TD right>{u.valPleito>0?brl(u.valPleito):"—"}</TD>
-                                <TD right color={u.diferenca>0?"#C8A96E":"#5A5A5A"}>{u.diferenca>0?brl(u.diferenca):"—"}</TD>
-                                <TD right color="#7A7A9A">{pctReaj!=null?pct(pctReaj):"—"}</TD>
-                                <TD right color="#A8E87C">{u.pctAceito>0?pct(u.pctAceito):"—"}</TD>
+                                <td style={tdR("#5A5A5A")}>{u.nRev}</td>
+                                <td style={tdR("#8A8A8A")}>{u.valAtual>0?brl(u.valAtual):"—"}</td>
+                                <td style={tdR()}>{u.valPleito>0?brl(u.valPleito):"—"}</td>
+                                <td style={tdR(u.diferenca>0?"#C8A96E":"#5A5A5A")}>{u.diferenca>0?brl(u.diferenca):"—"}</td>
+                                <td style={tdR("#7A7A9A")}>{pctReaj!=null?pct(pctReaj):"—"}</td>
+                                <td style={tdR("#A8E87C")}>{u.pctAceito>0?pct(u.pctAceito):"—"}</td>
                                 <td style={{padding:"6px 10px"}}>
                                   <span style={{fontSize:9,padding:"2px 6px",whiteSpace:"nowrap",
                                     background:isAprov?"#0A2A0A":isRecus?"#2A0A0A":"#1A1A0A",
