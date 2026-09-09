@@ -422,30 +422,40 @@ function SecaoGerencial({ data, setData }) {
     // Update local state immediately
     setData(prev => prev.map(r => r._id===id ? {...r,[field]:value,_edited:true} : r));
 
-    // Save to Google Sheets
+    // Save to Google Sheets via API
     setSaving(true); setSaveMsg(null);
     try {
-      // Map field to column index (1-based row = header + data row)
-      const row = id + 2; // +1 for header, +1 for 1-based
-      // Get the current row's stored column indices
       const currentRow = data.find(r => r._id === id);
-      const colMap = { status: currentRow?._colStatus, tipo: currentRow?._colTipo };
-      const col = colMap[field];
-      if (col == null) return;
+      if (!currentRow) return;
+
+      // _id is the 0-based index in the raw CSV (excluding header)
+      // Row in sheet = id + 2 (1 for header + 1 for 1-based)
+      const sheetRow = id + 2;
+
+      // Column names to look up in the sheet
+      const colNames = {
+        status: "Status Real",
+        tipo:   "Tipo de Negócio",
+      };
+      const colName = colNames[field];
+      if (!colName) return;
 
       const res = await fetch("/api/update-sheet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ updates: [{ row, col, value }] }),
+        body: JSON.stringify({
+          updates: [{ row: sheetRow, colName, value }]
+        }),
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Erro ao salvar");
-      setSaveMsg({ ok: true, text: "Salvo ✓" });
+      setSaveMsg({ ok: true, text: "✓ Salvo na planilha" });
     } catch(e) {
+      console.error("Save error:", e);
       setSaveMsg({ ok: false, text: `Erro: ${e.message}` });
     } finally {
       setSaving(false);
-      setTimeout(() => setSaveMsg(null), 3000);
+      setTimeout(() => setSaveMsg(null), 4000);
     }
   };
 
