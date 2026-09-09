@@ -419,6 +419,7 @@ function SecaoGerencial({ data, setData }) {
   const [saveMsg, setSaveMsg] = useState(null);
 
   const editRow = async (id, field, value) => {
+    console.log("[editRow] called:", id, field, value);
     // Update local state immediately
     setData(prev => prev.map(r => r._id===id ? {...r,[field]:value,_edited:true} : r));
 
@@ -426,7 +427,8 @@ function SecaoGerencial({ data, setData }) {
     setSaving(true); setSaveMsg(null);
     try {
       const currentRow = data.find(r => r._id === id);
-      if (!currentRow) return;
+      console.log("[editRow] currentRow:", currentRow?._id, "sheetRow:", id+2);
+      if (!currentRow) { console.log("[editRow] no row found"); return; }
 
       // _id is the 0-based index in the raw CSV (excluding header)
       // Row in sheet = id + 2 (1 for header + 1 for 1-based)
