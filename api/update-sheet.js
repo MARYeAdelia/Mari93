@@ -9,103 +9,94 @@ export default async function handler(req, res) {
   const GID      = "2073814116";
 
   try {
-    // Parse service account credentials from env var
     const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
-    const { updates } = req.body; // [{ row: N, col: N, value: "..." }, ...]
+    const { updates } = req.body;
+    if (!updates?.length) return res.status(400).json({ error: "No updates" });
 
-    if (!updates?.length) return res.status(400).json({ error: "No updates provided" });
-
-    // Get access token via JWT
     const token = await getAccessToken(creds);
 
-    // Convert GID to sheet name via Sheets API
+    // Get sheet metadata to find column positions and sheet name
     const metaRes = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     const meta = await metaRes.json();
     const sheet = meta.sheets?.find(s => String(s.properties.sheetId) === GID);
-    const sheetName = sheet?.properties?.title || "Gerencial";
+    const sheetName = sheet?.properties?.title;
+    if (!sheetName) throw new Error(`Sheet with GID ${GID} not found`);
 
-    // Build batch update request
-    const data = updates.map(({ row, col, value }) => ({
-      range: `${sheetName}!${colLetter(col)}${row}`,
-      values: [[value]],
-    }));
+    // Get header row to find column positions by name
+    const headerRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheetName)}!1:1`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const headerData = await headerRes.json();
+    const headers = headerData.values?.[0] || [];
+
+    // Build batch update
+    const data = updates.map(({ row, colName, value }) => {
+      const colIdx = headers.findIndex(h =>
+        h.trim().toLowerCase() === colName.trim().toLowerCase()
+      );
+      if (colIdx < 0) throw new Error(`Column "${colName}" not found in headers: ${headers.join(", ")}`);
+      const colLetter = idxToCol(colIdx);
+      return {
+        range: `${sheetName}!${colLetter}${row}`,
+        values: [[value]],
+      };
+    });
 
     const updateRes = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ valueInputOption: "USER_ENTERED", data }),
       }
     );
-
     const result = await updateRes.json();
-    if (!updateRes.ok) throw new Error(result.error?.message || "Sheets API error");
+    if (!updateRes.ok) throw new Error(result.error?.message || JSON.stringify(result));
 
-    res.status(200).json({ ok: true, updated: updates.length });
+    res.status(200).json({ ok: true, updated: updates.length, sheetName });
   } catch (err) {
-    console.error("update-sheet error:", err);
+    console.error("update-sheet error:", err.message);
     res.status(500).json({ error: err.message });
   }
 }
 
-// Convert column index (0-based) to letter (A, B, C...)
-const colLetter = n => {
-  let s = "";
-  n++;
-  while (n > 0) { s = String.fromCharCode(65 + (n-1) % 26) + s; n = Math.floor((n-1) / 26); }
+const idxToCol = n => {
+  let s = ""; n++;
+  while (n > 0) { s = String.fromCharCode(64 + (n - 1) % 26 + 1) + s; n = Math.floor((n - 1) / 26); }
   return s;
 };
 
-// Generate JWT and get access token for Google API
 async function getAccessToken(creds) {
   const now = Math.floor(Date.now() / 1000);
   const payload = {
     iss: creds.client_email,
     scope: "https://www.googleapis.com/auth/spreadsheets",
     aud: "https://oauth2.googleapis.com/token",
-    iat: now,
-    exp: now + 3600,
+    iat: now, exp: now + 3600,
   };
+  const enc = s => btoa(JSON.stringify(s)).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
+  const unsigned = `${enc({ alg:"RS256", typ:"JWT" })}.${enc(payload)}`;
 
-  // Build JWT
-  const header = btoa(JSON.stringify({ alg: "RS256", typ: "JWT" })).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
-  const body   = btoa(JSON.stringify(payload)).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
-  const unsigned = `${header}.${body}`;
-
-  // Sign with private key using Web Crypto
-  const pemKey = creds.private_key
-    .replace("-----BEGIN PRIVATE KEY-----", "")
-    .replace("-----END PRIVATE KEY-----", "")
-    .replace(/\s/g, "");
-  const keyBytes = Uint8Array.from(atob(pemKey), c => c.charCodeAt(0));
-  const cryptoKey = await crypto.subtle.importKey(
+  const pem = creds.private_key.replace(/-----.*?-----/g,"").replace(/\s/g,"");
+  const keyBytes = Uint8Array.from(atob(pem), c => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey(
     "pkcs8", keyBytes.buffer,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false, ["sign"]
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]
   );
-  const sigBytes = await crypto.subtle.sign(
-    "RSASSA-PKCS1-v1_5", cryptoKey,
-    new TextEncoder().encode(unsigned)
-  );
-  const sig = btoa(String.fromCharCode(...new Uint8Array(sigBytes)))
+  const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(unsigned));
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)))
     .replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
 
-  const jwt = `${unsigned}.${sig}`;
-
-  // Exchange JWT for access token
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${unsigned}.${sigB64}`,
   });
-  const tokenData = await tokenRes.json();
-  if (!tokenData.access_token) throw new Error("Failed to get access token: " + JSON.stringify(tokenData));
-  return tokenData.access_token;
+  const td = await tokenRes.json();
+  if (!td.access_token) throw new Error("Token error: " + JSON.stringify(td));
+  return td.access_token;
 }
